@@ -8,6 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -17,63 +18,59 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Check ZIP
+      - name: Check repository files
         shell: bash
         run: |
-          echo "=== Repository files ==="
-          ls -lah
+          echo "===== Repository files ====="
+          find . -maxdepth 3 -type f -print
 
-          if [ ! -f "tripbrain 2.zip" ]; then
-            echo "ERROR: tripbrain 2.zip was not found!"
-            echo "ZIP files available:"
-            find . -maxdepth 2 -type f -iname "*.zip" -print
+      - name: Find ZIP file
+        shell: bash
+        run: |
+          echo "===== Searching for ZIP ====="
+
+          ZIP_FILE=$(find . -maxdepth 3 -type f -iname "*.zip" -print -quit)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No ZIP file found in repository!"
             exit 1
           fi
 
-          echo "FOUND: tripbrain 2.zip"
+          echo "ZIP FOUND:"
+          echo "$ZIP_FILE"
+
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
       - name: Extract TripBrain project
         shell: bash
         run: |
+          echo "===== Extracting project ====="
+
           rm -rf project
           mkdir -p project
 
-          echo "Extracting TripBrain..."
-          unzip -o "tripbrain 2.zip" -d project
+          unzip -o "$ZIP_FILE" -d project
 
-          echo "=== Extracted files ==="
-          find project -maxdepth 4 -type f -print | head -200
+          echo "===== Extracted files ====="
+          find project -maxdepth 4 -type f -print
 
       - name: Find Android project
         shell: bash
         run: |
-          echo "Searching for Android project..."
+          echo "===== Finding Android project ====="
 
-          SETTINGS=$(find project -type f \( \
-            -name "settings.gradle" -o \
-            -name "settings.gradle.kts" \
-          \) -print -quit)
+          PROJECT_SETTINGS=$(find project \
+            -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -print -quit)
 
-          if [ -n "$SETTINGS" ]; then
-            PROJECT_DIR=$(dirname "$SETTINGS")
-          else
-            BUILD_FILE=$(find project -type f \( \
-              -name "build.gradle" -o \
-              -name "build.gradle.kts" \
-            \) -print -quit)
-
-            if [ -z "$BUILD_FILE" ]; then
-              echo "ERROR: No Android Gradle project found."
-              echo "Gradle files found:"
-              find project -type f \( \
-                -name "build.gradle" -o \
-                -name "build.gradle.kts" \
-              \) -print
-              exit 1
-            fi
-
-            PROJECT_DIR=$(dirname "$BUILD_FILE")
+          if [ -z "$PROJECT_SETTINGS" ]; then
+            echo "ERROR: Android project not found!"
+            echo "No settings.gradle or settings.gradle.kts found."
+            exit 1
           fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_SETTINGS")
 
           echo "Android project found at:"
           echo "$PROJECT_DIR"
@@ -83,46 +80,65 @@ jobs:
       - name: Install Gradle 8.9
         shell: bash
         run: |
+          echo "===== Installing Gradle 8.9 ====="
+
           wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip
 
           unzip -q gradle-8.9-bin.zip -d "$HOME"
 
           echo "$HOME/gradle-8.9/bin" >> "$GITHUB_PATH"
 
+          gradle --version
+
       - name: Check Gradle
         shell: bash
         run: |
+          echo "===== Checking Gradle ====="
+
+          cd "$PROJECT_DIR"
+
           gradle --version
 
       - name: Build TripBrain APK
         shell: bash
         run: |
+          echo "===== Building TripBrain APK ====="
+
           cd "$PROJECT_DIR"
 
-          echo "=== Project contents ==="
-          ls -lah
-
-          echo "=== Starting APK build ==="
-
-          gradle assembleDebug \
-            --no-daemon \
-            --stacktrace \
-            --warning-mode all
+          gradle assembleDebug --no-daemon --stacktrace
 
       - name: Find APK
         shell: bash
         run: |
-          echo "=== Searching for APK ==="
+          echo "===== Searching for APK ====="
 
-          find "$PROJECT_DIR" \
+          APK_FILE=$(find "$PROJECT_DIR" \
             -type f \
             -name "*.apk" \
-            -print
+            -print -quit)
+
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: APK was not created!"
+            exit 1
+          fi
+
+          echo "APK FOUND:"
+          echo "$APK_FILE"
+
+          echo "APK_FILE=$APK_FILE" >> "$GITHUB_ENV"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TripBrain-debug
-          path: |
-            project/**/build/outputs/apk/**/*.apk
+          name: TripBrain-APK
+          path: ${{ env.APK_FILE }}
           if-no-files-found: error
+
+      - name: Build completed
+        shell: bash
+        run: |
+          echo "===================================="
+          echo "       TRIPBRAIN BUILD SUCCESS"
+          echo "===================================="
+          echo "APK: $APK_FILE"
